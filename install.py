@@ -22,14 +22,29 @@ CONFIG_URLS = {
     "preferences": f"{REPO_BASE}/preferences",
     "bind/user.bind": f"{REPO_BASE}/bind/user.bind",
     "Macros/Macros_Standard.lyx": f"{REPO_BASE}/Macros/Macros_Standard.lyx",
-    "templates/Assignments.lyx": f"{REPO_BASE}/templates/Assignments.lyx"  # FIX: Changed Templates -> templates for consistency
+    "templates/Assignments.lyx": f"{REPO_BASE}/templates/Assignments.lyx"
 }
 
-# Essential Hebrew Font (David CLM) for User-Mode fallback
 FONT_URL = "https://raw.githubusercontent.com/StupidityInc/lyx-config/main/fonts/DavidCLM-Medium.otf"
-# For now, we will assume system install or warn user.
 
 # --- UTILITIES ---
+
+def is_interactive():
+    """Check if we're running interactively (not piped)."""
+    return sys.stdin.isatty()
+
+def ask_user(question, default='n'):
+    """Ask user a question. If piped, use default."""
+    if not is_interactive():
+        print(f"{question} [Auto: {default}]")
+        return default
+    
+    try:
+        choice = input(f"{question} [y/N]: ").lower()
+        return choice if choice else default
+    except (EOFError, KeyboardInterrupt):
+        print("\nUsing default: No")
+        return default
 
 def run_interactive(cmd, desc):
     """Runs a command where the user might need to interact (e.g. Password)."""
@@ -60,13 +75,16 @@ def fetch_content(url):
 
 def step_1_init():
     os.system("reset")
-    print("=== StupidityInc LyX Installer (Final Interactive) ===")
+    print("=== StupidityInc LyX Installer ===")
+    if not is_interactive():
+        print("⚙️  Running in non-interactive mode (using defaults)")
 
 def step_2_dependencies():
     """Installs fonts and tools. Asks user for permission first."""
     print("\n[?] Do you want to try installing System Fonts (fonts-culmus)?")
     print("    (This requires your SUDO PASSWORD)")
-    choice = input("    Install System Fonts? [y/N]: ").lower()
+    
+    choice = ask_user("    Install System Fonts?", default='n')
     
     if choice == 'y':
         if which("apt"):
@@ -76,6 +94,8 @@ def step_2_dependencies():
             run_interactive("sudo dnf install -y flatpak git curl culmus-fonts", "Installing Fonts & Tools")
         else:
             print("⚠️  Package manager not found. Skipping system font install.")
+    else:
+        print("    Skipping system fonts installation.")
 
 def step_3_install_lyx():
     """Installs LyX via Flatpak."""
@@ -88,7 +108,6 @@ def step_3_install_lyx():
     
     run_interactive("flatpak install --user -y flathub org.lyx.LyX", "Installing LyX App")
     
-    # Permissions Magic
     print("[LyX Installer] configuring Permissions (Fonts & Files)...")
     run_quiet("flatpak override --user --filesystem=host org.lyx.LyX")
     run_quiet("flatpak override --user --filesystem=/usr/share/fonts org.lyx.LyX")
@@ -98,12 +117,8 @@ def step_4_configure():
     """Downloads and patches configs."""
     print("\n[LyX Installer] Downloading Configurations...")
     
-    # Locate Flatpak Config Dir
     config_dir = Path.home() / ".var/app/org.lyx.LyX/config/lyx"
     
-    # FIX: Create config directory properly instead of relying on running LyX
-    # The old command was incorrect: flatpak run --command=lyx doesn't work properly
-    # Instead, just ensure the directory exists
     if not config_dir.exists():
         print(f"[LyX Installer] Creating config directory: {config_dir}")
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -115,12 +130,9 @@ def step_4_configure():
         
         content = fetch_content(url)
         if content:
-            # PATCH: Force David CLM if the file requests standard fonts
             if "preferences" in local_path:
-                # Force Hebrew Fonts
                 content = content.replace('screen_font_roman "LM Sans Quot 8"', 'screen_font_roman "David CLM"')
                 content = content.replace('screen_font_sans "Latin Modern Roman"', 'screen_font_sans "Simple CLM"')
-                # Force TeX Path (Standard Linux Path)
                 if "\\path_prefix" not in content:
                     content += '\n\\path_prefix "/usr/bin:/usr/local/bin"\n'
             
@@ -132,7 +144,6 @@ def step_4_configure():
 
 def step_5_finish():
     print("\n[LyX Installer] Finalizing...")
-    # Fix the missing icon
     run_quiet("update-desktop-database ~/.local/share/applications")
     
     print("\n" + "="*40)
