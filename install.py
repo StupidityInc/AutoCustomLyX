@@ -1,61 +1,46 @@
 """
-LyX Hebrew Installation Script (StupidityInc Version)
-Installs TeXLive, required packages, LyX, and scrapes custom configs.
+LyX Hebrew Installation Script
+Installs TeXLive, required packages and LyX.
 """
 
 import os
 import subprocess
 import sys
 import time
-import urllib.request
-import urllib.error
 from shutil import rmtree, which
 from urllib.request import urlopen
-from pathlib import Path
-
-# --- CONFIGURATION ---
-CONFIG_REPO_RAW = "https://raw.githubusercontent.com/StupidityInc/lyx-config/main"
 
 ### UTILITIES ###
+
 
 def is_windows() -> bool:
     return sys.platform == "win32"
 
+
 def sudo():
     return "sudo " if not is_windows() else ""
 
+
 def panic(message: str):
     print(f"[LyX Hebrew] {message}")
-    sys.exit(-1)
+    exit(-1)
+
 
 def prompt(message: str):
-    try:
-        if not input(f"[LyX Hebrew] {message} [y/n]: ").lower().startswith("y"):
-            panic("Aborting installation.")
-    except EOFError:
-        pass 
+    if not input(f"[LyX Hebrew] {message} [y/n]: ").lower().startswith("y"):
+        panic("Aborting installation.")
+
 
 def run(command: str):
     if os.system(command) != 0:
-        print(f"[LyX Hebrew] Warning: Command '{command}' failed.")
+        prompt("It seems the last command failed. Do you still wish to continue?")
 
-def fetch_raw(remote_path):
-    """Downloads a raw file from the config repo."""
-    url = f"{CONFIG_REPO_RAW}/{remote_path}"
-    try:
-        print(f"[LyX Hebrew] Downloading {remote_path}...")
-        with urllib.request.urlopen(url) as response:
-            return response.read().decode('utf-8')
-    except urllib.error.HTTPError as e:
-        print(f"[LyX Hebrew] ❌ Error downloading {remote_path}: {e}")
-        return None
-    except Exception as e:
-        print(f"[LyX Hebrew] ❌ Unexpected error: {e}")
-        return None
 
-### TEXLIVE & LYX INSTALLATION LOGIC ###
+### TEXLIVE ###
+
 
 def download_texlive_installer() -> str:
+    """Downloads the TeXLive Installer (https://www.tug.org/texlive/acquire-netinstall.html) and returns the path to it. Should support Windows, macOS and Linux."""
     installer_url = (
         "https://mirror.ctan.org/systems/texlive/tlnet/install-tl.zip"
         if is_windows()
@@ -71,7 +56,9 @@ def download_texlive_installer() -> str:
     if os.path.exists("install-tl"):
         rmtree("install-tl")
 
-    run(f"mkdir install-tl && tar -xf {installer_archive_filename} -C install-tl --strip-components=1")
+    run(
+        f"mkdir install-tl && tar -xf {installer_archive_filename} -C install-tl --strip-components=1"
+    )
     os.remove(installer_archive_filename)
     return (
         ".\\install-tl\\install-tl-windows.bat -no-gui"
@@ -79,35 +66,34 @@ def download_texlive_installer() -> str:
         else "./install-tl/install-tl"
     )
 
+
 def cleanup_texlive_installer():
-    if os.path.exists("install-tl"):
-        rmtree("install-tl")
+    rmtree("install-tl")
+
 
 def get_texlive_installation_directory():
     return "C:\\texlive" if is_windows() else "/usr/local/texlive"
 
+
 def get_latest_texlive_installation_directory():
     installation_directory = get_texlive_installation_directory()
-    if not os.path.exists(installation_directory):
-        return None
-    try:
-        last_installation = sorted(
-            [int(s) for s in os.listdir(installation_directory) if s.isnumeric()]
-        )[-1]
-        return os.path.join(installation_directory, str(last_installation))
-    except IndexError:
-        return None
+    last_installation = sorted(
+        [int(s) for s in os.listdir(installation_directory) if s.isnumeric()]
+    )[-1]
+
+    return os.path.join(installation_directory, str(last_installation))
+
 
 def get_texlive_binary_directory():
-    latest = get_latest_texlive_installation_directory()
-    if not latest: return None
-    bin_directory = os.path.join(latest, "bin")
-    if not os.path.exists(bin_directory): return None
+    bin_directory = os.path.join(get_latest_texlive_installation_directory(), "bin")
+    # The bin directory should only contain a single folder with binaries for the host OS
     contents = os.listdir(bin_directory)
-    dirs = [d for d in contents if os.path.isdir(os.path.join(bin_directory, d))]
-    if len(dirs) == 1:
-        return os.path.join(bin_directory, dirs[0])
-    return None
+    assert len(contents) == 1
+    return os.path.join(bin_directory, contents[0])
+
+
+### LYX ###
+
 
 def install_lyx():
     if sys.platform == "win32":
@@ -116,41 +102,38 @@ def install_lyx():
         elif which("choco") is not None:
             run("choco install lyx")
         else:
-            print("Downloading LyX installer...")
-            installer = urlopen("https://lyx.mirror.garr.it/bin/2.3.7/LyX-237-Installer-1-x64.exe").read()
+            installer = urlopen(
+                "https://lyx.mirror.garr.it/bin/2.3.7/LyX-237-Installer-1-x64.exe"
+            ).read()
             with open("lyx-installer.exe", "wb") as installer_file:
                 installer_file.write(installer)
-            run("lyx-installer.exe /S")
+            current_directory = os.path.abspath(".")
+            os.chdir(get_texlive_binary_directory())
+            run(f"{os.path.join(current_directory, 'lyx-installer.exe')} /S")
+            os.chdir(current_directory)
             os.remove("lyx-installer.exe")
     elif sys.platform == "darwin":
         if which("brew") is not None:
             run("brew install lyx")
         else:
-            panic("Please install Homebrew: https://brew.sh/")
+            panic("Please install Homebrew on your system: https://brew.sh/")
     else:
-        # Check for Flatpak first
-        if which("flatpak") is not None:
-            print("[LyX Hebrew] Installing via Flatpak...")
-            run("flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")
-            run("flatpak install --user -y flathub org.lyx.LyX")
-            run("flatpak override --user --filesystem=host org.lyx.LyX")
-            for font_path in [Path.home()/".fonts", Path.home()/".local/share/fonts", "/usr/share/fonts"]:
-                 if os.path.exists(font_path):
-                     run(f"flatpak override --user --filesystem={font_path} org.lyx.LyX")
-        elif which("apt-get") is not None:
-            run("sudo apt-get install -y lyx")
+        if which("apt-get") is not None:
+            run("sudo apt-get install lyx")
         elif which("dnf") is not None:
             run("sudo dnf install lyx")
         elif which("yay") is not None:
             run("yay -S lyx")
+        elif which("paru") is not None:
+            run("paru -S lyx")
         else:
-            prompt("Please install LyX manually.")
+            prompt(
+                "Please install LyX using your package manager and then run the installation script again. Have you installed LyX?"
+            )
+
 
 def get_lyx_user_directory():
-    """Locates the LyX user folder, prioritizing Flatpak if present."""
-    flatpak_path = Path.home() / ".var/app/org.lyx.LyX/config/lyx"
-    if flatpak_path.exists():
-        return str(flatpak_path)
+    """https://wiki.lyx.org/LyX/UserDir"""
 
     if sys.platform == "win32":
         roaming = os.environ["APPDATA"]
@@ -160,16 +143,19 @@ def get_lyx_user_directory():
             return os.path.join(roaming, latest_lyx[-1])
     elif sys.platform == "darwin":
         application_support = os.path.expanduser("~/Library/Application Support")
-        if os.path.exists(application_support):
-            application_support_contents = os.listdir(application_support)
-            latest_lyx = sorted([f for f in application_support_contents if f.startswith("LyX")])
-            if len(latest_lyx) != 0:
-                return os.path.join(application_support, latest_lyx[-1])
+        application_support_contents = os.listdir(application_support)
+        latest_lyx = sorted(
+            [f for f in application_support_contents if f.startswith("LyX")]
+        )
+        if len(latest_lyx) != 0:
+            return os.path.join(application_support, latest_lyx[-1])
     else:
         return os.path.expanduser("~/.lyx")
 
+
 def get_lyx_library_directory():
-    """Locates the system LyX directory (needed for finding the exe on Windows)."""
+    """https://wiki.lyx.org/LyX/SystemDir"""
+
     if sys.platform == "win32":
         for base_directory in [
             os.path.join(os.environ["APPDATA"], "..", "Local"),
@@ -177,113 +163,226 @@ def get_lyx_library_directory():
             "C:\\Program Files (x86)",
             "C:\\Program Files",
         ]:
-            if os.path.exists(base_directory):
-                contents = os.listdir(base_directory)
-                latest_lyx = sorted([f for f in contents if f.startswith("LyX")])
-                if len(latest_lyx) != 0:
-                    return os.path.join(base_directory, latest_lyx[-1])
+            contents = os.listdir(base_directory)
+            latest_lyx = sorted([f for f in contents if f.startswith("LyX")])
+            if len(latest_lyx) != 0:
+                return os.path.join(base_directory, latest_lyx[-1])
     elif sys.platform == "darwin":
         return "/Applications/LyX.app/Contents/Resources"
     else:
         return "/usr/local/share/lyx/"
 
-def open_and_close_lyx():
-    """Runs LyX briefly to generate the initial folder structure."""
-    print("[LyX Hebrew] Initializing user directory...")
-    if which("flatpak") and os.path.exists(Path.home() / ".var/app/org.lyx.LyX"):
-         try:
-             subprocess.run(["flatpak", "run", "--command=lyx", "org.lyx.LyX", "-e", "info"], timeout=10)
-         except subprocess.TimeoutExpired:
-             pass
-         except Exception as e:
-             print(f"Flatpak init warning: {e}")
-    elif sys.platform == "darwin":
-        os.system("open -a LyX")
-        time.sleep(5)
-        os.system("osascript -e 'quit app \"LyX\"'")
-    else:
-        lyx_bin = "lyx"
-        if is_windows():
-             lib_dir = get_lyx_library_directory()
-             if lib_dir: lyx_bin = os.path.join(lib_dir, "bin", "LyX.exe")
-        
-        try:
-            subprocess.run([lyx_bin, "-e", "info"], timeout=10) 
-        except:
-            pass
 
-### MAIN EXECUTION ###
+def open_and_close_lyx():
+    if sys.platform == "darwin":
+        if os.system("open -a LyX") != 0:
+            print(
+                "Please manually open the LyX app and immediately close it, and then press enter."
+            )
+            input(
+                "You may need to right click it and then click 'Open Anyway' to do so. "
+            )
+        time.sleep(10)
+        os.system("""osascript -e 'quit app "LyX"'""")
+    else:
+        lyx = (
+            os.path.join(get_lyx_library_directory(), "bin", "LyX.exe")
+            if is_windows()
+            else "/usr/bin/lyx"
+        )
+        p = subprocess.Popen([lyx])
+        time.sleep(10)
+        p.kill()
+
 
 if __name__ == "__main__":
-    
-    # 1. TEXLIVE CHECK
-    tex_dir = get_texlive_installation_directory()
-    tex_bin = get_texlive_binary_directory()
-    
-    if not is_windows() and which("flatpak"):
-        print("[LyX Hebrew] Detected Flatpak environment. Skipping system TeXLive check.")
-    elif (not tex_dir or not os.path.exists(tex_dir) or not tex_bin):
-        print("[LyX Hebrew] TeXLive not found. Installing...")
+    # Bad installation of texlive: no tlmgr
+    if os.path.exists(get_texlive_installation_directory()) and (
+        not os.path.exists(
+            os.path.join(get_latest_texlive_installation_directory(), "bin")
+        )
+        or len(
+            os.listdir(os.path.join(get_latest_texlive_installation_directory(), "bin"))
+        )
+        == 0
+        or not os.path.exists(
+            os.path.join(
+                get_texlive_binary_directory(), "tlmgr.bat" if is_windows() else "tlmgr"
+            )
+        )
+    ):
+        rmtree(get_texlive_installation_directory())
+        print("[LyX Hebrew] Done removing bad installation of texlive.")
+
+    if (
+        not os.path.exists(get_texlive_installation_directory())
+        or len(os.listdir(get_texlive_installation_directory())) == 0
+    ):
+        print("[LyX Hebrew] Downloading texlive installer...")
         installer = download_texlive_installer()
+        print("[LyX Hebrew] Done downloading texlive installer.")
+
+        print("[LyX Hebrew] Installing texlive...")
         run(f"{sudo()}{installer} --scheme basic --no-interaction")
+        print("[LyX Hebrew] Done installing texlive.")
+
         cleanup_texlive_installer()
-        
-        print("[LyX Hebrew] Installing Hebrew packages...")
-        tex_bin = get_texlive_binary_directory()
-        if tex_bin:
-            tlmgr = os.path.join(tex_bin, "tlmgr")
-            run(f"{sudo()}{tlmgr} install babel-hebrew hebrew-fonts culmus")
 
-    # 2. LYX INSTALL CHECK
-    lyx_user_directory = get_lyx_user_directory()
-    if not lyx_user_directory:
-        print("[LyX Hebrew] LyX user directory not found. Installing/Initializing LyX...")
+    print("[LyX Hebrew] Installing packages using tlmgr...")
+    texlive_binary_directory = get_texlive_binary_directory()
+    tlmgr = os.path.join(texlive_binary_directory, "tlmgr")
+    run(f"{sudo()}{tlmgr} install babel-hebrew hebrew-fonts culmus")
+    print("[LyX Hebrew] Done installing packages using tlmgr.")
+
+    try:
+        lyx = os.path.join(get_lyx_library_directory(), "bin", "LyX.exe")
+        if not os.path.exists(lyx):
+            raise Exception()
+    except:
+        print("[LyX Hebrew] Installing LyX...")
         install_lyx()
+        print("[LyX Hebrew] Done installing LyX.")
+
+    if get_lyx_user_directory() is None or not os.path.exists(get_lyx_user_directory()):
+        print(
+            "[LyX Hebrew] Opening and closing LyX to initialize the user directory. There's no need to interact with it!"
+        )
         open_and_close_lyx()
-        lyx_user_directory = get_lyx_user_directory()
-    
-    if not lyx_user_directory or not os.path.exists(lyx_user_directory):
-        print("[LyX Hebrew] Could not locate LyX user folder. Please open LyX once manually.")
-        sys.exit(1)
+        print("[LyX Hebrew] Closed LyX after it initialized the user directory.")
 
-    print(f"[LyX Hebrew] Configuring LyX in: {lyx_user_directory}")
+    if get_lyx_user_directory() is None or not os.path.exists(get_lyx_user_directory()):
+        print("[LyX Hebrew] Unable to find LyX User Directory.")
+        print('[LyX Hebrew] Please open and close LyX manually to create them, and then press "Enter".')
+        print("[LyX Hebrew] If LyX is not installed, please retry the installation.")
+        input()
 
-    # 3. CREATE DIRECTORIES
-    for folder in ["bind", "Macros", "templates"]:
-        target_dir = os.path.join(lyx_user_directory, folder)
-        os.makedirs(target_dir, exist_ok=True)
+    print("[LyX Hebrew] Setting up settings for hebrew...")
+    lyx_user_directory = get_lyx_user_directory()
+    preferences_file = os.path.join(lyx_user_directory, "preferences")
+    with open(preferences_file, "a") as preferences:
+        preferences.write(
+            f"""
+\\kbmap true
+\\kbmap_primary "null"
+\\kbmap_secondary "hebrew"
+\\visual_cursor true
+\\path_prefix "{texlive_binary_directory}"
+""".strip()
+            + "\n"
+        )
 
-    # 4. SCRAPE CONFIG FILES
-    
-    # A. Preferences
-    pref_content = fetch_raw("preferences")
-    if pref_content:
-        if tex_bin and "\\path_prefix" not in pref_content:
-             pref_content += f'\n\\path_prefix "{tex_bin}"'
-        
-        with open(os.path.join(lyx_user_directory, "preferences"), "w", encoding="utf-8") as f:
-            f.write(pref_content)
-        print("[LyX Hebrew] Updated preferences.")
+    user_bind_file = os.path.join(lyx_user_directory, "bind", "user.bind")
+    with open(user_bind_file, "a") as user_bind:
+        user_bind.write(
+            """
+\\bind "A-space" "language hebrew"
+""".strip()
+            + "\n"
+        )
 
-    # B. Shortcuts (user.bind)
-    bind_content = fetch_raw("bind/user.bind")
-    if bind_content:
-        with open(os.path.join(lyx_user_directory, "bind", "user.bind"), "w", encoding="utf-8") as f:
-            f.write(bind_content)
-        print("[LyX Hebrew] Updated shortcuts (user.bind).")
+    default_template_file = os.path.join(
+        lyx_user_directory, "templates", "defaults.lyx"
+    )
+    with open(default_template_file, "w") as default_template:
+        default_template.write(
+            """
+#LyX 2.3 created this file. For more info see http://www.lyx.org/
+\\lyxformat 544
+\\begin_document
+\\begin_header
+\\save_transient_properties true
+\\origin unavailable
+\\textclass heb-article
+\\begin_preamble
+\\usepackage[use-david]{culmus}
+\\end_preamble
+\\use_default_options true
+\\maintain_unincluded_children false
+\\language hebrew
+\\language_package default
+\\inputencoding auto
+\\fontencoding global
+\\font_roman "default" "default"
+\\font_sans "default" "default"
+\\font_typewriter "default" "default"
+\\font_math "auto" "auto"
+\\font_default_family default
+\\use_non_tex_fonts false
+\\font_sc false
+\\font_osf false
+\\font_sf_scale 100 100
+\\font_tt_scale 100 100
+\\use_microtype false
+\\use_dash_ligatures true
+\\graphics default
+\\default_output_format default
+\\output_sync 0
+\\bibtex_command default
+\\index_command default
+\\paperfontsize default
+\\spacing single
+\\use_hyperref false
+\\papersize default
+\\use_geometry true
+\\use_package amsmath 1
+\\use_package amssymb 1
+\\use_package cancel 1
+\\use_package esint 1
+\\use_package mathdots 1
+\\use_package mathtools 1
+\\use_package mhchem 1
+\\use_package stackrel 1
+\\use_package stmaryrd 1
+\\use_package undertilde 1
+\\cite_engine basic
+\\cite_engine_type default
+\\biblio_style plain
+\\use_bibtopic false
+\\use_indices false
+\\paperorientation portrait
+\\suppress_date false
+\\justification true
+\\use_refstyle 1
+\\use_minted 0
+\\index Index
+\\shortcut idx
+\\color #008000
+\\end_index
+\\leftmargin 1.5cm
+\\topmargin 2cm
+\\rightmargin 1.5cm
+\\bottommargin 2cm
+\\secnumdepth 3
+\\tocdepth 3
+\\paragraph_separation indent
+\\paragraph_indentation default
+\\is_math_indent 0
+\\math_numbering_side default
+\\quotes_style english
+\\dynamic_quotes 0
+\\papercolumns 1
+\\papersides 1
+\\paperpagestyle default
+\\tracking_changes false
+\\output_changes false
+\\html_math_output 0
+\\html_css_as_file 0
+\\html_be_strict false
+\\end_header
 
-    # C. Macros
-    macro_content = fetch_raw("Macros/Macros_Standard.lyx")
-    if macro_content:
-        with open(os.path.join(lyx_user_directory, "Macros", "Macros_Standard.lyx"), "w", encoding="utf-8") as f:
-            f.write(macro_content)
-        print("[LyX Hebrew] Installed Macros.")
+\\begin_body
 
-    # D. Templates
-    template_content = fetch_raw("Templates/Assignments.lyx")
-    if template_content:
-        with open(os.path.join(lyx_user_directory, "templates", "Assignments.lyx"), "w", encoding="utf-8") as f:
-            f.write(template_content)
-        print("[LyX Hebrew] Installed Assignment Template.")
+\\begin_layout Standard
 
-    print("\n[LyX Hebrew] Installation Complete!")
+\\end_layout
+
+\\end_body
+\\end_document
+            """.strip()
+            + "\n"
+        )
+    print("[LyX Hebrew] Done setting up settings for hebrew")
+    print("[LyX Hebrew] Installation is complete!")
+    print(
+        "[LyX Hebrew] You may now use LyX and hebrew should work for you. Make sure to keep your system language as English, and if you want to type English in your document use Alt+Space to switch to it."
+    )
