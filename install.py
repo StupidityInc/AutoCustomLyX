@@ -1,98 +1,131 @@
 #!/usr/bin/env python3
+"""
+Updated LyX Hebrew Installation Script for StupidityInc
+Scrapes from: https://github.com/StupidityInc/lyx-config
+"""
+
 import os
-import shutil
 import subprocess
+import sys
+import time
 import urllib.request
 import urllib.error
+from shutil import rmtree, which
 from pathlib import Path
 
 # --- CONFIGURATION ---
-# 1. The Script is in AutoCustomLyX (where you run the curl command from).
-# 2. The Config Files are in 'lyx-config'.
-#    We assume the branch is 'main' based on your folder structure. 
-#    (If it's 'master', change 'main' to 'master' below).
-CONFIG_REPO_URL = "https://raw.githubusercontent.com/StupidityInc/lyx-config/main"
+CONFIG_REPO_RAW = "https://raw.githubusercontent.com/StupidityInc/lyx-config/main"
 
-# Map: "Remote File in lyx-config" : "Local File in Flatpak Config"
-FILES_TO_FETCH = {
-    "preferences": "preferences",
-    "bind/user.bind": "bind/user.bind",
-    "Macros/Macros_Standard.lyx": "Macros/Macros_Standard.lyx",
-    "Templates/Assignments.lyx": "templates/Assignments.lyx"
-}
+### UTILITIES ###
 
-FLATPAK_ID = "org.lyx.LyX"
-FLATPAK_CONFIG_DIR = Path.home() / f".var/app/{FLATPAK_ID}/config/lyx"
+def is_windows() -> bool:
+    return sys.platform == "win32"
 
-def run_cmd(cmd):
-    """Executes a shell command."""
-    print(f"Executing: {cmd}")
-    subprocess.run(cmd, shell=True, check=True)
+def sudo():
+    return "sudo " if not is_windows() else ""
 
-def ensure_flatpak():
-    """Installs Flatpak if missing."""
-    if shutil.which("flatpak") is None:
-        print("📦 Flatpak not found. Installing...")
-        run_cmd("sudo apt update && sudo apt install -y flatpak")
+def panic(message: str):
+    print(f"[LyX Hebrew] {message}")
+    exit(-1)
+
+def run(command: str):
+    print(f"[LyX Hebrew] Executing: {command}")
+    if os.system(command) != 0:
+        print(f"[LyX Hebrew] Warning: Command failed.")
+
+def fetch_raw(remote_path):
+    """Downloads a raw file from the config repo."""
+    url = f"{CONFIG_REPO_RAW}/{remote_path}"
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.read().decode('utf-8')
+    except urllib.error.HTTPError:
+        print(f"[LyX Hebrew] 404: Could not find {remote_path} on GitHub.")
+        return None
+
+### LYX DIRECTORY LOGIC ###
+
+def get_lyx_user_directory():
+    # Priority 1: Flatpak (Requested for Mint/Linux check)
+    flatpak_path = Path.home() / ".var/app/org.lyx.LyX/config/lyx"
+    if flatpak_path.exists():
+        return str(flatpak_path)
+
+    # Priority 2: Standard OS Paths
+    if is_windows():
+        roaming = os.environ.get("APPDATA", "")
+        latest_lyx = sorted([f for f in os.listdir(roaming) if f.startswith("LyX")]) if roaming else []
+        return os.path.join(roaming, latest_lyx[-1]) if latest_lyx else None
+    elif sys.platform == "darwin":
+        support = os.path.expanduser("~/Library/Application Support")
+        latest_lyx = sorted([f for f in os.listdir(support) if f.startswith("LyX")])
+        return os.path.join(support, latest_lyx[-1]) if latest_lyx else None
+    else:
+        return os.path.expanduser("~/.lyx")
+
+### MAIN INSTALLER LOGIC ###
 
 def install_lyx():
-    """Installs LyX and sets permissions."""
-    print(f"--- 📦 Setting up {FLATPAK_ID} ---")
-    run_cmd("flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")
-    run_cmd(f"flatpak install --user -y flathub {FLATPAK_ID}")
-    
-    print("🔓 Unlocking filesystem permissions...")
-    # Essential for accessing your home folder (Git, Documents)
-    run_cmd(f"flatpak override --user --filesystem=host {FLATPAK_ID}")
-    
-    # Expose System Fonts (Crucial for Hebrew / Culmus)
-    font_paths = [
-        Path.home() / ".fonts", 
-        Path.home() / ".local/share/fonts", 
-        Path("/usr/share/fonts"),
-        Path("/usr/local/share/fonts")
-    ]
-    for fp in font_paths:
-        if fp.exists():
-            run_cmd(f"flatpak override --user --filesystem={fp} {FLATPAK_ID}")
-
-def scrape_config():
-    """Downloads config files from lyx-config repo."""
-    print(f"\n--- 📥 Scraping Configuration from {CONFIG_REPO_URL} ---")
-    
-    if not FLATPAK_CONFIG_DIR.exists():
-        FLATPAK_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-
-    for remote_path, local_rel_path in FILES_TO_FETCH.items():
-        url = f"{CONFIG_REPO_URL}/{remote_path}"
-        dest = FLATPAK_CONFIG_DIR / local_rel_path
-        
-        print(f"⬇️  Fetching: {remote_path} -> {local_rel_path}")
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            urllib.request.urlretrieve(url, dest)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                print(f"❌ 404 Error: File not found in lyx-config.")
-                print(f"   Looking for: {url}")
-            else:
-                print(f"❌ HTTP Error {e.code}: {url}")
-        except Exception as e:
-            print(f"❌ Error: {e}")
-
-def main():
-    print("🚀 Starting AutoCustomLyX Installer...")
-    try:
-        ensure_flatpak()
-        install_lyx()
-        scrape_config()
-        print("\n" + "="*40)
-        print("✅ Installation Complete!")
-        print(f"   Launch LyX: flatpak run {FLATPAK_ID}")
-        print("   IMPORTANT: Open LyX -> Tools -> Reconfigure, then Restart.")
-        print("="*40)
-    except Exception as e:
-        print(f"\n❌ Script Failed: {e}")
+    """Installs LyX via Flatpak (Primary) or System Package (Secondary)."""
+    if not is_windows() and which("flatpak"):
+        print("[LyX Hebrew] Installing via Flatpak...")
+        run("flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo")
+        run("flatpak install --user -y flathub org.lyx.LyX")
+        run("flatpak override --user --filesystem=host org.lyx.LyX")
+    elif is_windows():
+        run("winget install lyx.lyx")
+    else:
+        run(f"{sudo()}apt-get install -y lyx")
 
 if __name__ == "__main__":
-    main()
+    # 1. Install LyX if missing
+    lyx_user_dir = get_lyx_user_directory()
+    if not lyx_user_dir or not os.path.exists(lyx_user_dir):
+        print("[LyX Hebrew] LyX not detected. Attempting installation...")
+        install_lyx()
+        # Initialize user dir
+        print("[LyX Hebrew] Initializing user directory...")
+        time.sleep(2)
+        lyx_user_dir = get_lyx_user_directory()
+        if not os.path.exists(lyx_user_dir):
+            os.makedirs(lyx_user_dir, exist_ok=True)
+
+    print(f"[LyX Hebrew] Using Directory: {lyx_user_dir}")
+
+    # 2. CREATE FOLDER STRUCTURE
+    for subfolder in ["bind", "Macros", "templates", "layouts"]:
+        path = os.path.join(lyx_user_dir, subfolder)
+        if not os.path.exists(path):
+            print(f"[LyX Hebrew] Creating folder: {subfolder}")
+            os.makedirs(path, exist_ok=True)
+
+    # 3. SCRAPE CONFIGURATION
+    print("[LyX Hebrew] Scraping custom configurations...")
+    
+    # A. Preferences (Cites:)
+    pref_content = fetch_raw("preferences")
+    if pref_content:
+        with open(os.path.join(lyx_user_dir, "preferences"), "w", encoding="utf-8") as f:
+            f.write(pref_content)
+
+    # B. Bindings (Cites:)
+    bind_content = fetch_raw("bind/user.bind")
+    if bind_content:
+        with open(os.path.join(lyx_user_dir, "bind", "user.bind"), "w", encoding="utf-8") as f:
+            f.write(bind_content)
+
+    # C. Macros (Cites:)
+    macro_content = fetch_raw("Macros/Macros_Standard.lyx")
+    if macro_content:
+        with open(os.path.join(lyx_user_dir, "Macros", "Macros_Standard.lyx"), "w", encoding="utf-8") as f:
+            f.write(macro_content)
+
+    # D. Templates (Cites:)
+    template_content = fetch_raw("Templates/Assignments.lyx")
+    if template_content:
+        with open(os.path.join(lyx_user_dir, "templates", "Assignments.lyx"), "w", encoding="utf-8") as f:
+            f.write(template_content)
+
+    print("\n[LyX Hebrew] Installation Complete!")
+    print("[LyX Hebrew] Files Scraped successfully from lyx-config repository.")
+    print("[LyX Hebrew] Please restart LyX and run 'Tools -> Reconfigure'.")
