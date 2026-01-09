@@ -9,6 +9,20 @@ import sys
 import time
 from shutil import rmtree, which
 from urllib.request import urlopen
+import requests
+
+LYX_PREFRENCES_URL = (
+    "https://raw.githubusercontent.com/StupidityInc/lyx-config/main/preferences"
+)
+LYX_BIND_URL = (
+    "https://raw.githubusercontent.com/StupidityInc/lyx-config/main/bind/user.bind"
+)
+LYX_MACROS_URL = (
+    "https://raw.githubusercontent.com/StupidityInc/lyx-config/main/Macros/Macros_Standard.lyx"
+)
+LYX_TEMPLATE_URL = (
+    "https://raw.githubusercontent.com/StupidityInc/lyx-config/main/Templates/Assignments.lyx"
+)
 
 ### UTILITIES ###
 
@@ -193,6 +207,55 @@ def open_and_close_lyx():
         p = subprocess.Popen([lyx])
         time.sleep(10)
         p.kill()
+
+def download_github_file(raw_url, folder_path, file_name):
+    try:
+        # Validate inputs
+        if not raw_url or not folder_path or not file_name:
+            raise ValueError("raw_url, folder_path, and file_name cannot be empty")
+        
+        local_path = os.path.join(folder_path, file_name)
+        print(f"Downloading from: {raw_url}")
+        
+        # Create directory
+        try:
+            os.makedirs(folder_path, exist_ok=True)
+        except OSError as e:
+            raise OSError(f"Failed to create directory '{folder_path}': {e}")
+        
+        # Download file with shorter timeout
+        try:
+            print("Connecting...")
+            response = requests.get(raw_url, timeout=5)  # Reduced to 5 seconds
+            response.raise_for_status()
+            print(f"Downloaded {len(response.content)} bytes")
+        except requests.exceptions.Timeout:
+            raise requests.exceptions.Timeout(f"Connection timed out (5s) for URL: {raw_url}")
+        except requests.exceptions.ConnectionError:
+            raise requests.exceptions.ConnectionError(f"Failed to connect to {raw_url}")
+        except requests.exceptions.HTTPError:
+            raise requests.exceptions.HTTPError(f"HTTP error {response.status_code} for URL: {raw_url}")
+        
+        # Write file
+        try:
+            with open(local_path, 'wb') as f:
+                f.write(response.content)
+        except IOError as e:
+            raise IOError(f"Failed to write file '{local_path}': {e}")
+        
+        print(f'Success: {local_path}')
+        return True
+    
+    except Exception as e:
+        print(f'Error: {type(e).__name__}: {e}')
+        return False
+
+# Usage
+download_github_file(
+    'https://raw.githubusercontent.com/StupidityInc/lyx-config/main/preferences',
+    '/home/uri',
+    'test'
+)
 
 
 if __name__ == "__main__":
