@@ -7,15 +7,18 @@ import urllib.error
 from pathlib import Path
 
 # --- CONFIGURATION ---
-# We point to YOUR repo on the 'master' branch.
-REPO_BASE_URL = "https://raw.githubusercontent.com/StupidityInc/AutoCustomLyX/master"
+# 1. The Script is in AutoCustomLyX (where you run the curl command from).
+# 2. The Config Files are in 'lyx-config'.
+#    We assume the branch is 'main' based on your folder structure. 
+#    (If it's 'master', change 'main' to 'master' below).
+CONFIG_REPO_URL = "https://raw.githubusercontent.com/StupidityInc/lyx-config/main"
 
-# Format: "Remote Path in Git" : "Local Relative Path in LyX Config"
+# Map: "Remote File in lyx-config" : "Local File in Flatpak Config"
 FILES_TO_FETCH = {
     "preferences": "preferences",
     "bind/user.bind": "bind/user.bind",
     "Macros/Macros_Standard.lyx": "Macros/Macros_Standard.lyx",
-    "Templates/Assignments.lyx": "templates/Assignments.lyx" 
+    "Templates/Assignments.lyx": "templates/Assignments.lyx"
 }
 
 FLATPAK_ID = "org.lyx.LyX"
@@ -39,23 +42,29 @@ def install_lyx():
     run_cmd(f"flatpak install --user -y flathub {FLATPAK_ID}")
     
     print("🔓 Unlocking filesystem permissions...")
-    # Essential for Git and accessing your home folder
+    # Essential for accessing your home folder (Git, Documents)
     run_cmd(f"flatpak override --user --filesystem=host {FLATPAK_ID}")
     
-    # Expose System Fonts (Crucial for Hebrew)
-    font_paths = [Path.home() / ".fonts", Path.home() / ".local/share/fonts", Path("/usr/share/fonts")]
+    # Expose System Fonts (Crucial for Hebrew / Culmus)
+    font_paths = [
+        Path.home() / ".fonts", 
+        Path.home() / ".local/share/fonts", 
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts")
+    ]
     for fp in font_paths:
         if fp.exists():
             run_cmd(f"flatpak override --user --filesystem={fp} {FLATPAK_ID}")
 
 def scrape_config():
-    """Downloads config files directly from GitHub."""
-    print("\n--- 📥 Scraping Configuration ---")
+    """Downloads config files from lyx-config repo."""
+    print(f"\n--- 📥 Scraping Configuration from {CONFIG_REPO_URL} ---")
+    
     if not FLATPAK_CONFIG_DIR.exists():
         FLATPAK_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     for remote_path, local_rel_path in FILES_TO_FETCH.items():
-        url = f"{REPO_BASE_URL}/{remote_path}"
+        url = f"{CONFIG_REPO_URL}/{remote_path}"
         dest = FLATPAK_CONFIG_DIR / local_rel_path
         
         print(f"⬇️  Fetching: {remote_path} -> {local_rel_path}")
@@ -64,8 +73,8 @@ def scrape_config():
             urllib.request.urlretrieve(url, dest)
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                print(f"❌ 404 Error: Could not find '{remote_path}' in the repo.")
-                print(f"   (URL: {url})")
+                print(f"❌ 404 Error: File not found in lyx-config.")
+                print(f"   Looking for: {url}")
             else:
                 print(f"❌ HTTP Error {e.code}: {url}")
         except Exception as e:
